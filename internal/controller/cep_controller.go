@@ -1,11 +1,11 @@
 package controller
 
 import (
-	"errors"
 	"net/http"
 	"regexp"
 
 	"cep-api/internal/ports"
+	apperrors "cep-api/pkg/errors"
 	"cep-api/pkg/logger"
 
 	"github.com/gin-gonic/gin"
@@ -14,11 +14,17 @@ import (
 var cepRegex = regexp.MustCompile(`^\d{8}$`)
 
 type CEPController struct {
-	service ports.CEPService
+	service    ports.CEPService
+	translator *apperrors.Translator
 }
 
 func NewCEPController(service ports.CEPService) *CEPController {
-	return &CEPController{service: service}
+	translator := apperrors.NewTranslator().
+		Register(ports.ErrNotFound, http.StatusNotFound).
+		Register(ports.ErrTimeout, http.StatusGatewayTimeout).
+		Register(ports.ErrBothFailed, http.StatusInternalServerError)
+
+	return &CEPController{service: service, translator: translator}
 }
 
 func (c *CEPController) LookupCEP(ctx *gin.Context) {
@@ -35,18 +41,9 @@ func (c *CEPController) LookupCEP(ctx *gin.Context) {
 
 	result, err := c.service.LookupCEP(reqCtx, cep)
 	if err != nil {
-		if errors.Is(err, ports.ErrTimeout) {
-			logger.Warnf(reqCtx, "CEPController.LookupCEP", "timeout ao consultar CEP %s", cep)
-			ctx.JSON(http.StatusGatewayTimeout, gin.H{
-				"error": err.Error(),
-			})
-			return
-		}
-
+		status := c.translator.Translate(err)
 		logger.Errorf(reqCtx, "CEPController.LookupCEP", "erro ao consultar CEP %s", err, cep)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error": "erro interno ao consultar CEP",
-		})
+		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 

@@ -33,6 +33,7 @@ func (s *CEPServiceImpl) LookupCEP(ctx context.Context, cep string) (*model.CEPR
 		provider string
 		data     json.RawMessage
 		err      error
+		notFound bool
 	}
 
 	logger.Infof(ctx, "CEPService.LookupCEP", "iniciando consulta para CEP %s", cep)
@@ -45,13 +46,19 @@ func (s *CEPServiceImpl) LookupCEP(ctx context.Context, cep string) (*model.CEPR
 	go func() {
 		url := fmt.Sprintf(s.cfg.BrasilAPIURL, cep)
 		data, err := s.fetchAPI(ctx, url)
-		ch <- result{provider: "BrasilAPI", data: data, err: err}
+		notFound := err != nil && err.Error() == "status 404"
+		ch <- result{provider: "BrasilAPI", data: data, err: err, notFound: notFound}
 	}()
 
 	go func() {
 		url := fmt.Sprintf(s.cfg.ViaCEPURL, cep)
 		data, err := s.fetchAPI(ctx, url)
-		ch <- result{provider: "ViaCEP", data: data, err: err}
+		notFound := false
+		if err == nil && isViaCEPError(data) {
+			err = fmt.Errorf("CEP não encontrado")
+			notFound = true
+		}
+		ch <- result{provider: "ViaCEP", data: data, err: err, notFound: notFound}
 	}()
 
 	select {
@@ -69,6 +76,10 @@ func (s *CEPServiceImpl) LookupCEP(ctx context.Context, cep string) (*model.CEPR
 				return &model.CEPResult{Provider: r2.provider, Data: r2.data}, nil
 			}
 			logger.Warnf(ctx, "CEPService.LookupCEP", "falha em %s para CEP %s: %s", r2.provider, cep, r2.err.Error())
+			if r.notFound && r2.notFound {
+				logger.Warnf(ctx, "CEPService.LookupCEP", "CEP %s não encontrado em nenhuma API", cep)
+				return nil, ports.ErrNotFound
+			}
 			logger.Error(ctx, "CEPService.LookupCEP", "ambas as APIs falharam para CEP "+cep, ports.ErrBothFailed)
 			return nil, ports.ErrBothFailed
 		case <-time.After(s.cfg.Timeout):
@@ -79,6 +90,13 @@ func (s *CEPServiceImpl) LookupCEP(ctx context.Context, cep string) (*model.CEPR
 		logger.Warnf(ctx, "CEPService.LookupCEP", "timeout: nenhuma API respondeu para CEP %s", cep)
 		return nil, ports.ErrTimeout
 	}
+}
+
+func isViaCEPError(data json.RawMessage) bool {
+	var v struct {
+		Erro string `json:"erro"`
+	}
+	return json.Unmarshal(data, &v) == nil && v.Erro == "true"
 }
 
 func (s *CEPServiceImpl) fetchAPI(ctx context.Context, url string) (json.RawMessage, error) {

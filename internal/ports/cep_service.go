@@ -10,6 +10,7 @@ import (
 var (
 	ErrTimeout    = errors.New("timeout: nenhuma API respondeu dentro de 1 segundo")
 	ErrBothFailed = errors.New("ambas as APIs falharam")
+	ErrNotFound   = errors.New("CEP não encontrado")
 )
 
 type CEPService interface {

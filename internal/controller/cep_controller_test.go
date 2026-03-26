@@ -68,6 +68,28 @@ func TestLookupCEP_ViaCEP(t *testing.T) {
 	assert.Equal(t, "ViaCEP", response.Provider)
 }
 
+func TestLookupCEP_NotFound(t *testing.T) {
+	mockService := mocks.NewCEPService(t)
+	ctrl := NewCEPController(mockService)
+
+	mockService.On("LookupCEP", mock.Anything, "99999999").Return(
+		(*model.CEPResult)(nil),
+		ports.ErrNotFound,
+	)
+
+	r := setupRouter(ctrl)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/cep/99999999", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, ports.ErrNotFound.Error(), response["error"])
+}
+
 func TestLookupCEP_Timeout(t *testing.T) {
 	mockService := mocks.NewCEPService(t)
 	ctrl := NewCEPController(mockService)
@@ -109,7 +131,7 @@ func TestLookupCEP_InternalError(t *testing.T) {
 	var response map[string]string
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Equal(t, "erro interno ao consultar CEP", response["error"])
+	assert.Equal(t, ports.ErrBothFailed.Error(), response["error"])
 }
 
 func TestLookupCEP_InvalidCEP(t *testing.T) {
