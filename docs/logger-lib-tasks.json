@@ -1,0 +1,167 @@
+{
+  "project": "pkg/logger",
+  "description": "Biblioteca de logs estruturados em Go com slog, contexto obrigatório e middleware HTTP",
+  "tasks": [
+    {
+      "id": "TASK-01",
+      "user_story": "US-01",
+      "title": "Criar estrutura do pacote e arquivo options.go",
+      "description": "Definir a estrutura base do pacote, os tipos Level e Config, e a função Setup com instância global.",
+      "file": "pkg/logger/options.go",
+      "subtasks": [
+        "Criar o módulo Go com go.mod em pkg/logger",
+        "Definir o tipo Level (int) com as constantes LevelDebug, LevelInfo, LevelWarn, LevelError",
+        "Definir a struct Config com campos ServiceName string e Level Level",
+        "Criar a variável global defaultLogger do tipo *Logger",
+        "Implementar Setup(cfg Config) que inicializa o defaultLogger com slog.NewJSONHandler apontando para os.Stdout",
+        "Garantir valor default: se Setup não for chamado, usar ServiceName='app' e Level=LevelInfo",
+        "Mapear o tipo Level para slog.Level"
+      ],
+      "acceptance_criteria": [
+        "logger.Setup() pode ser chamado sem pânico",
+        "Chamadas sem Setup prévio usam defaults",
+        "ServiceName aparece em todos os logs como campo 'service'"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "TASK-02",
+      "user_story": "US-04",
+      "title": "Implementar context.go — enriquecimento e extração de contexto",
+      "description": "Criar as funções para injetar e extrair trace_id e user_id do context.Context usando chaves privadas tipadas.",
+      "file": "pkg/logger/context.go",
+      "subtasks": [
+        "Definir tipos privados para chaves de contexto (ex: type ctxKey int)",
+        "Criar constantes privadas ctxKeyTraceID e ctxKeyUserID",
+        "Implementar WithTraceID(ctx context.Context, id string) context.Context",
+        "Implementar WithUserID(ctx context.Context, id string) context.Context",
+        "Implementar extractFromContext(ctx context.Context) (traceID, userID string) para extração interna",
+        "Garantir que campos ausentes no contexto não apareçam no JSON"
+      ],
+      "acceptance_criteria": [
+        "WithTraceID e WithUserID retornam novo contexto sem modificar o original",
+        "Valores extraídos do contexto correspondem aos injetados",
+        "Chaves são unexported, sem risco de colisão externa",
+        "Campos omitidos do JSON quando não presentes no contexto"
+      ],
+      "dependencies": ["TASK-01"]
+    },
+    {
+      "id": "TASK-03",
+      "user_story": "US-02",
+      "title": "Implementar logger.go — funções públicas sem formatação",
+      "description": "Implementar as funções globais Debug, Info, Warn, Error e Fatal que delegam para o defaultLogger.",
+      "file": "pkg/logger/logger.go",
+      "subtasks": [
+        "Definir a struct Logger com campo interno handler slog.Handler",
+        "Implementar função interna log(ctx, level, src, msg, err) que monta os campos e chama o slog.Handler",
+        "Extrair trace_id e user_id do contexto via extractFromContext em toda chamada",
+        "Incluir os campos fixos: timestamp (RFC3339 com timezone), level, service, src, message",
+        "Implementar Debug(ctx context.Context, src string, msg string)",
+        "Implementar Info(ctx context.Context, src string, msg string)",
+        "Implementar Warn(ctx context.Context, src string, msg string)",
+        "Implementar Error(ctx context.Context, src string, msg string, err error)",
+        "Implementar Fatal(ctx context.Context, src string, msg string, err error) com os.Exit(1) após o log",
+        "Logs abaixo do nível configurado devem ser silenciados"
+      ],
+      "acceptance_criteria": [
+        "Todas as funções produzem JSON válido no stdout",
+        "Campo 'error' contém err.Error() como string",
+        "Fatal chama os.Exit(1) após logar",
+        "Logs abaixo do nível configurado não são emitidos",
+        "Contexto vazio não quebra a execução"
+      ],
+      "dependencies": ["TASK-01", "TASK-02"]
+    },
+    {
+      "id": "TASK-04",
+      "user_story": "US-03",
+      "title": "Implementar funções com formatação (Debugf, Infof, Warnf, Errorf, Fatalf)",
+      "description": "Adicionar as variantes 'f' de cada nível, que aceitam args variádicos e formatam a mensagem via fmt.Sprintf.",
+      "file": "pkg/logger/logger.go",
+      "subtasks": [
+        "Implementar Debugf(ctx context.Context, src string, msg string, args ...any)",
+        "Implementar Infof(ctx context.Context, src string, msg string, args ...any)",
+        "Implementar Warnf(ctx context.Context, src string, msg string, args ...any)",
+        "Implementar Errorf(ctx context.Context, src string, msg string, err error, args ...any)",
+        "Implementar Fatalf(ctx context.Context, src string, msg string, err error, args ...any)",
+        "Formatar msg via fmt.Sprintf(msg, args...) antes de passar para a função interna de log",
+        "Fatalf deve chamar os.Exit(1) após logar"
+      ],
+      "acceptance_criteria": [
+        "Mensagem formatada aparece corretamente no campo 'message' do JSON",
+        "Campo 'error' presente em Errorf e Fatalf com err.Error()",
+        "Fatalf chama os.Exit(1)",
+        "Comportamento idêntico às variantes sem 'f', exceto pela formatação da mensagem"
+      ],
+      "dependencies": ["TASK-03"]
+    },
+    {
+      "id": "TASK-05",
+      "user_story": "US-05",
+      "title": "Implementar middleware.go — TraceMiddleware HTTP",
+      "description": "Criar o middleware HTTP que lê ou gera o X-Correlation-ID e o injeta no contexto da requisição.",
+      "file": "pkg/logger/middleware.go",
+      "subtasks": [
+        "Adicionar dependência github.com/google/uuid ao go.mod",
+        "Implementar TraceMiddleware(next http.Handler) http.Handler",
+        "Ler o header X-Correlation-ID da requisição de entrada",
+        "Se o header estiver presente, usar o valor como trace_id",
+        "Se o header estiver ausente, gerar UUID v4 via uuid.NewString()",
+        "Injetar o trace_id no contexto via WithTraceID",
+        "Escrever X-Correlation-ID na response com o mesmo valor antes de chamar next.ServeHTTP",
+        "Passar o contexto enriquecido para o próximo handler"
+      ],
+      "acceptance_criteria": [
+        "Request com X-Correlation-ID usa o valor recebido",
+        "Request sem X-Correlation-ID recebe UUID v4 gerado",
+        "Response sempre contém X-Correlation-ID",
+        "O trace_id está disponível no contexto para todos os logs da request",
+        "Compatível com http.Handler padrão do Go"
+      ],
+      "dependencies": ["TASK-02"]
+    },
+    {
+      "id": "TASK-06",
+      "user_story": "US-06",
+      "title": "Implementar nop.go — logger silencioso para testes",
+      "description": "Criar um Logger que descarta todo output, para uso em testes unitários sem poluição de stdout.",
+      "file": "pkg/logger/nop.go",
+      "subtasks": [
+        "Implementar NewNop() *Logger que usa slog.NewJSONHandler apontando para io.Discard",
+        "Garantir que nenhum output seja produzido em stdout ou stderr ao usar o Nop",
+        "Garantir que todas as funções (Info, Error, Fatal, etc.) podem ser chamadas sem pânico no Nop"
+      ],
+      "acceptance_criteria": [
+        "NewNop() não produz nenhum output",
+        "Todas as funções de log funcionam sem pânico com o Nop",
+        "Fatal no Nop ainda chama os.Exit(1) — comportamento idêntico ao logger real"
+      ],
+      "dependencies": ["TASK-03"]
+    },
+    {
+      "id": "TASK-07",
+      "user_story": "ALL",
+      "title": "Testes unitários e de integração",
+      "description": "Cobrir os comportamentos críticos da lib com testes automatizados.",
+      "file": "pkg/logger/*_test.go",
+      "subtasks": [
+        "Testar que Setup com Config customizado aplica ServiceName e Level corretamente",
+        "Testar que logs abaixo do nível configurado não são emitidos",
+        "Testar que WithTraceID e WithUserID injetam e extraem valores corretamente",
+        "Testar que o JSON de saída contém todos os campos obrigatórios (timestamp, level, service, src, message)",
+        "Testar que Error e Errorf incluem o campo 'error' com err.Error()",
+        "Testar as funções 'f' com interpolação de args variádicos",
+        "Testar TraceMiddleware com header presente (reutiliza) e ausente (gera UUID)",
+        "Testar que TraceMiddleware devolve X-Correlation-ID na response",
+        "Testar que NewNop() não produz output (capturar stdout em teste)"
+      ],
+      "acceptance_criteria": [
+        "Cobertura mínima de 80% no pacote",
+        "Todos os testes passam com go test ./pkg/logger/...",
+        "Nenhum teste escreve em stdout sem ser capturado"
+      ],
+      "dependencies": ["TASK-01", "TASK-02", "TASK-03", "TASK-04", "TASK-05", "TASK-06"]
+    }
+  ]
+}

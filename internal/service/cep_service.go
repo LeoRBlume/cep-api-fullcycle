@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +10,8 @@ import (
 
 	"cep-api/config"
 	"cep-api/internal/model"
+	"cep-api/internal/ports"
+	"cep-api/pkg/logger"
 )
 
 type CEPServiceImpl struct {
@@ -34,6 +35,11 @@ func (s *CEPServiceImpl) LookupCEP(ctx context.Context, cep string) (*model.CEPR
 		err      error
 	}
 
+	logger.Infof(ctx, "CEPService.LookupCEP", "iniciando consulta para CEP %s", cep)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	ch := make(chan result, 2)
 
 	go func() {
@@ -51,24 +57,33 @@ func (s *CEPServiceImpl) LookupCEP(ctx context.Context, cep string) (*model.CEPR
 	select {
 	case r := <-ch:
 		if r.err == nil {
+			logger.Infof(ctx, "CEPService.LookupCEP", "CEP %s retornado por %s", cep, r.provider)
 			return &model.CEPResult{Provider: r.provider, Data: r.data}, nil
 		}
-		// First failed, wait for second
+		logger.Warnf(ctx, "CEPService.LookupCEP", "falha em %s para CEP %s: %s", r.provider, cep, r.err.Error())
+		// Primeira falhou, aguarda a segunda
 		select {
 		case r2 := <-ch:
 			if r2.err == nil {
+				logger.Infof(ctx, "CEPService.LookupCEP", "CEP %s retornado por %s", cep, r2.provider)
 				return &model.CEPResult{Provider: r2.provider, Data: r2.data}, nil
 			}
-			return nil, errors.New("ambas as APIs falharam")
+			logger.Warnf(ctx, "CEPService.LookupCEP", "falha em %s para CEP %s: %s", r2.provider, cep, r2.err.Error())
+			logger.Error(ctx, "CEPService.LookupCEP", "ambas as APIs falharam para CEP "+cep, ports.ErrBothFailed)
+			return nil, ports.ErrBothFailed
 		case <-time.After(s.cfg.Timeout):
-			return nil, errors.New("timeout: nenhuma API respondeu dentro de 1 segundo")
+			logger.Warnf(ctx, "CEPService.LookupCEP", "timeout aguardando segunda API para CEP %s", cep)
+			return nil, ports.ErrTimeout
 		}
 	case <-time.After(s.cfg.Timeout):
-		return nil, errors.New("timeout: nenhuma API respondeu dentro de 1 segundo")
+		logger.Warnf(ctx, "CEPService.LookupCEP", "timeout: nenhuma API respondeu para CEP %s", cep)
+		return nil, ports.ErrTimeout
 	}
 }
 
 func (s *CEPServiceImpl) fetchAPI(ctx context.Context, url string) (json.RawMessage, error) {
+	logger.Debugf(ctx, "CEPService.fetchAPI", "chamando %s", url)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err

@@ -1,13 +1,19 @@
 package main
 
 import (
-	"log"
+	"context"
 
 	"cep-api/internal/app"
+	"cep-api/pkg/logger"
 )
 
 func main() {
+	logger.Setup(logger.Config{
+		ServiceName: "cep-api",
+		Level:       logger.LevelInfo,
+	})
+
 	if err := app.Run(); err != nil {
-		log.Fatalf("failed to start application: %v", err)
+		logger.Fatal(context.Background(), "main", "falha ao iniciar aplicação", err)
 	}
 }

@@ -7,7 +7,8 @@ import (
 )
 
 func SetupRouter(ctrl *controller.CEPController) *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
 	r.GET("/cep/:cep", ctrl.LookupCEP)
 	return r
 }

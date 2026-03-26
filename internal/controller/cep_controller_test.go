@@ -2,12 +2,12 @@ package controller
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"cep-api/internal/model"
+	"cep-api/internal/ports"
 	"cep-api/tests/mocks"
 
 	"github.com/gin-gonic/gin"
@@ -74,7 +74,7 @@ func TestLookupCEP_Timeout(t *testing.T) {
 
 	mockService.On("LookupCEP", mock.Anything, "99999999").Return(
 		(*model.CEPResult)(nil),
-		errors.New("timeout: nenhuma API respondeu dentro de 1 segundo"),
+		ports.ErrTimeout,
 	)
 
 	r := setupRouter(ctrl)
@@ -96,7 +96,7 @@ func TestLookupCEP_InternalError(t *testing.T) {
 
 	mockService.On("LookupCEP", mock.Anything, "00000000").Return(
 		(*model.CEPResult)(nil),
-		errors.New("ambas as APIs falharam"),
+		ports.ErrBothFailed,
 	)
 
 	r := setupRouter(ctrl)
@@ -110,4 +110,20 @@ func TestLookupCEP_InternalError(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "erro interno ao consultar CEP", response["error"])
+}
+
+func TestLookupCEP_InvalidCEP(t *testing.T) {
+	cases := []string{"abc", "1234567", "123456789", "1234-567"}
+	for _, cep := range cases {
+		mockService := mocks.NewCEPService(t)
+		ctrl := NewCEPController(mockService)
+
+		r := setupRouter(ctrl)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/cep/"+cep, nil)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code, "CEP: %q", cep)
+		mockService.AssertNotCalled(t, "LookupCEP")
+	}
 }

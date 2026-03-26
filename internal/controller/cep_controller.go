@@ -1,16 +1,17 @@
 package controller
 
 import (
-	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
-	"strings"
+	"regexp"
 
-	"cep-api/internal/model"
 	"cep-api/internal/ports"
+	"cep-api/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )
+
+var cepRegex = regexp.MustCompile(`^\d{8}$`)
 
 type CEPController struct {
 	service ports.CEPService
@@ -22,43 +23,33 @@ func NewCEPController(service ports.CEPService) *CEPController {
 
 func (c *CEPController) LookupCEP(ctx *gin.Context) {
 	cep := ctx.Param("cep")
+	reqCtx := ctx.Request.Context()
 
-	result, err := c.service.LookupCEP(ctx.Request.Context(), cep)
+	if !cepRegex.MatchString(cep) {
+		logger.Warnf(reqCtx, "CEPController.LookupCEP", "CEP inválido recebido: %s", cep)
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": "CEP inválido: deve conter 8 dígitos numéricos",
+		})
+		return
+	}
+
+	result, err := c.service.LookupCEP(reqCtx, cep)
 	if err != nil {
-		if strings.Contains(err.Error(), "timeout") {
-			fmt.Printf("\n[TIMEOUT] Nenhuma API respondeu dentro do prazo para o CEP: %s\n", cep)
+		if errors.Is(err, ports.ErrTimeout) {
+			logger.Warnf(reqCtx, "CEPController.LookupCEP", "timeout ao consultar CEP %s", cep)
 			ctx.JSON(http.StatusGatewayTimeout, gin.H{
 				"error": err.Error(),
 			})
 			return
 		}
 
-		fmt.Printf("\n[ERRO] Falha ao consultar CEP %s: %s\n", cep, err.Error())
+		logger.Errorf(reqCtx, "CEPController.LookupCEP", "erro ao consultar CEP %s", err, cep)
 		ctx.JSON(http.StatusInternalServerError, gin.H{
 			"error": "erro interno ao consultar CEP",
 		})
 		return
 	}
 
-	printResult(cep, result)
-
+	logger.Infof(reqCtx, "CEPController.LookupCEP", "CEP %s consultado com sucesso via %s", cep, result.Provider)
 	ctx.JSON(http.StatusOK, result)
-}
-
-func printResult(cep string, result *model.CEPResult) {
-	fmt.Println("\n========================================")
-	fmt.Printf("CEP Consultado: %s\n", cep)
-	fmt.Printf("Resposta de: %s\n", result.Provider)
-	fmt.Println("----------------------------------------")
-
-	var pretty map[string]any
-	if err := json.Unmarshal(result.Data, &pretty); err == nil {
-		for k, v := range pretty {
-			fmt.Printf("  %s: %v\n", k, v)
-		}
-	} else {
-		fmt.Printf("  %s\n", string(result.Data))
-	}
-
-	fmt.Println("========================================")
 }
