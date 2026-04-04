@@ -34,7 +34,7 @@ func (c *CEPController) LookupCEP(ctx *gin.Context) {
 	if !cepRegex.MatchString(cep) {
 		logger.Warnf(reqCtx, "CEPController.LookupCEP", "CEP inválido recebido: %s", cep)
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": "CEP inválido: deve conter 8 dígitos numéricos",
+			"error": "CEP inválido: deve conter 8 dígitos numéricos.",
 		})
 		return
 	}
