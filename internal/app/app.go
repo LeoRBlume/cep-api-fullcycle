@@ -18,6 +18,7 @@ func Run() error {
 
 	svc := service.NewCEPService(cfg)
 	ctrl := controller.NewCEPController(svc)
+	logger.Infof(context.Background(), "app.Run", "Iniciando router")
 	r := router.SetupRouter(ctrl)
 
 	return http.ListenAndServe(cfg.Port, logger.TraceMiddleware(r))
